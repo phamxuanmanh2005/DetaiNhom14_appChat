@@ -5,11 +5,12 @@ clients = []
 
 def broadcast(message, sender_socket):
     for client in clients:
-        try:
-            client.send(message)
-        except:
-            client.close()
-            clients.remove(client)
+        if client != sender_socket:
+            try:
+                client.send(message)
+            except:
+                client.close()
+                clients.remove(client)
 
 def handle_client(client_socket):
     while True:
