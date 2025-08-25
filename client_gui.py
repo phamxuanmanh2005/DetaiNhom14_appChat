@@ -222,6 +222,7 @@ class ChatClient:
             except:
                 pass
 
+    # --- xử lý server response ---
     def process_server_line(self, line):
         def ui(fn, *a, **kw):
             self.master.after(0, fn, *a, **kw)
@@ -231,7 +232,7 @@ class ChatClient:
         elif line.startswith("ERR"):
             reason = line[4:] if len(line) > 4 else line
             ui(messagebox.showerror, "Lỗi", reason)
-        elif line.startswith("LOGIN_OK") or line.startswith("OK"):  # thêm xử lý OK
+        elif line.startswith("LOGIN_OK") or line.startswith("OK"):
             parts = line.split(" ", 1)
             nick = parts[1] if len(parts) > 1 else self.username
             self.nickname = nick
@@ -332,35 +333,29 @@ class ChatClient:
             self.send_line(f"FRIEND_REJECT {from_user}")
         win.destroy()
 
-    def display_incoming_message(self, from_user, msg):
-        if self.current_friend == from_user:
-            self.text_area.config(state="normal")
-            self.text_area.insert(tk.END, f"{self.user_nick_map.get(from_user, from_user)}: {msg}\n")
-            self.text_area.config(state="disabled")
-            self.text_area.see(tk.END)
-            return
-        if from_user in self.friend_windows:
-            ta, _, win = self.friend_windows[from_user]
-            self.append_text(ta, f"{self.user_nick_map.get(from_user, from_user)}: {msg}\n")
-            return
-        win = tk.Toplevel(self.master)
-        win.title(f"Tin nhắn từ {self.user_nick_map.get(from_user, from_user)}")
-        ta = tk.Text(win, state="disabled", width=50, height=10)
-        ta.pack()
-        ta.config(state="normal")
-        ta.insert(tk.END, f"{self.user_nick_map.get(from_user, from_user)}: {msg}\n")
-        ta.config(state="disabled")
-        entry = ttk.Entry(win, width=40)
-        entry.pack(side="left", padx=5, pady=5)
-        send_btn = ttk.Button(win, text="Gửi", command=lambda: self.send_private_message(from_user, entry, ta))
-        send_btn.pack(side="left", pady=5)
-        self.friend_windows[from_user] = (ta, entry, win)
+    def append_text(self, text_widget, msg):
+        text_widget.config(state="normal")
+        text_widget.insert(tk.END, msg)
+        text_widget.config(state="disabled")
+        text_widget.see(tk.END)
 
-    def append_text(self, ta, text):
-        ta.config(state="normal")
-        ta.insert(tk.END, text)
-        ta.config(state="disabled")
-        ta.see(tk.END)
+    def display_incoming_message(self, from_user, msg):
+        if from_user == self.current_friend:
+            self.append_text(self.text_area, f"{self.user_nick_map.get(from_user, from_user)}: {msg}\n")
+        elif from_user in self.friend_windows:
+            text_widget = self.friend_windows[from_user][0]
+            self.append_text(text_widget, f"{self.user_nick_map.get(from_user, from_user)}: {msg}\n")
+        else:
+            win = tk.Toplevel(self.master)
+            win.title(f"Tin nhắn từ {self.user_nick_map.get(from_user, from_user)}")
+            ta = tk.Text(win, state="disabled", width=50, height=10)
+            ta.pack()
+            self.append_text(ta, f"{self.user_nick_map.get(from_user, from_user)}: {msg}\n")
+            entry = ttk.Entry(win, width=40)
+            entry.pack(side="left", padx=5, pady=5)
+            send_btn = ttk.Button(win, text="Gửi", command=lambda: self.send_private_message(from_user, entry, ta))
+            send_btn.pack(side="left", pady=5)
+            self.friend_windows[from_user] = (ta, entry, win)
 
 
 if __name__ == "__main__":
