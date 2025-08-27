@@ -50,8 +50,6 @@ class ChatClient:
                  font=("Arial", 20, "bold")).pack(pady=(30, 10))
         tk.Label(left_frame, text="Hello, welcome!", fg="white", bg="#1565c0",
                  font=("Arial", 20, "bold")).pack(pady=(20, 10))
-        tk.Label(left_frame, text="Ứng dụng chat Client - Server\nPython + Tkinter",
-                 fg="white", bg="#1565c0", font=("Arial", 8)).pack(pady=8)
 
         # Khung phải
         right_frame = tk.Frame(self.login_frame, bg="white", width=350)
@@ -266,4 +264,5 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = ChatClient(root)
     root.mainloop()
+
 
