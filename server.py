@@ -1,25 +1,11 @@
 import socket
 import threading
-import os
+from data_store import users, lock, save_user
 
 HOST = "127.0.0.1"
 PORT = 12345
 
-users_file = "users.txt"
-users = {}      # username -> {password, nickname, friends: set(), pending: set()}
 clients = {}    # username -> socket
-lock = threading.Lock()
-
-# Load users từ file
-if os.path.exists(users_file):
-    with open(users_file, "r", encoding="utf-8") as f:
-        for line in f:
-            u, p, n = line.strip().split(",")
-            users[u] = {"password": p, "nickname": n, "friends": set(), "pending": set()}
-
-def save_user(username, password, nickname):
-    with open(users_file, "a", encoding="utf-8") as f:
-        f.write(f"{username},{password},{nickname}\n")
 
 def handle_client(conn, addr):
     username = None
@@ -58,6 +44,12 @@ def handle_client(conn, addr):
                             username = u
                             clients[username] = conn
                             conn.sendall(f"LOGIN_OK {users[u]['nickname']}\n".encode())
+                            
+                            # Gửi các lời mời kết bạn đang chờ
+                            for pending_user in users[username]["pending"]:
+                                if pending_user in users:
+                                    conn.sendall(f"FRIEND_REQ {pending_user} {users[pending_user]['nickname']}\n".encode())
+                            
                             # gửi danh sách bạn bè online
                             friend_list = []
                             for f in users[username]["friends"]:
@@ -107,6 +99,10 @@ def handle_client(conn, addr):
                 elif cmd == "FRIEND_ACCEPT" and len(parts) == 2:
                     from_user = parts[1]
                     with lock:
+                        # Xóa khỏi pending list
+                        if from_user in users[username]["pending"]:
+                            users[username]["pending"].remove(from_user)
+                        
                         # Thêm vào danh sách bạn bè của cả hai
                         users[username]["friends"].add(from_user)
                         users[from_user]["friends"].add(username)
@@ -136,6 +132,10 @@ def handle_client(conn, addr):
                 # FRIEND_REJECT
                 elif cmd == "FRIEND_REJECT" and len(parts) == 2:
                     from_user = parts[1]
+                    with lock:
+                        # Xóa khỏi pending list
+                        if from_user in users[username]["pending"]:
+                            users[username]["pending"].remove(from_user)
                     if from_user in clients:
                         clients[from_user].sendall(f"FRIEND_REJECTED {username}\n".encode())
 
