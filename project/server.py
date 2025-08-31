@@ -342,9 +342,7 @@ async def join_chat(sid, data):
 
     # Chỉ gửi thông báo join vào phòng chung với metadata
     await sio.emit("chat_message", {
-        "time": datetime.now(timezone.utc).astimezone(LOCAL_TZ).strftime("%H:%M:%S"),
         "username": "System",
-        "message": f"⚡ {username} đã tham gia phòng chat",
         "sender_id": 0,
         "receiver_id": None,
         "group_id": None
