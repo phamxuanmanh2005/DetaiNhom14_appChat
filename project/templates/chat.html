@@ -30,7 +30,10 @@
             <li class="section-title">👥 Nhóm</li>
             <ul id="groups-list">
                 {% for g in groups %}
-                    <li data-room="group_{{ g.id }}" data-group-id="{{ g.id }}">👥 {{ g.name }}</li>
+                    <li data-room="group_{{ g.id }}" data-group-id="{{ g.id }}" class="group-item">
+                        <span class="group-name">👥 {{ g.name }}</span>
+                        <button class="group-manage-btn" data-group-id="{{ g.id }}" data-group-name="{{ g.name }}" title="Quản lý nhóm">⚙️</button>
+                    </li>
                 {% endfor %}
             </ul>
 
@@ -44,13 +47,38 @@
         <div class="create-group">
             <h4>➕ Tạo nhóm mới</h4>
             <input type="text" id="new-group-name" placeholder="Tên nhóm..." />
-            <select id="new-group-member">
-                <option value="">Chọn thành viên</option>
-                {% for u in users %}
-                    <option value="{{ u.id }}">{{ u.username }}</option>
-                {% endfor %}
-            </select>
+            
+            <div class="member-selection">
+                <label>Chọn thành viên:</label>
+                <div id="new-group-members" class="member-list">
+                    {% for u in users %}
+                        <div class="member-item">
+                            <span class="member-name">{{ u.username }}</span>
+                            <button class="add-member-btn" data-user-id="{{ u.id }}" data-username="{{ u.username }}">Thêm</button>
+                        </div>
+                    {% endfor %}
+                </div>
+                <div class="selected-count">Đã chọn: <span id="selected-count">0</span> thành viên</div>
+            </div>
+            
             <button id="create-group-btn">Tạo nhóm</button>
+        </div>
+
+        <!-- Quản lý nhóm (ẩn mặc định) -->
+        <div id="group-management" class="group-management">
+            <div class="management-header">
+                <h4 id="manage-group-title">⚙️ Quản lý nhóm</h4>
+                <button class="close-management">✕</button>
+            </div>
+            
+            <div class="add-member-section">
+                <label>Thêm thành viên mới:</label>
+                <div id="add-group-members" class="member-list">
+                    <!-- Sẽ được populate bằng JS -->
+                </div>
+                <div class="selected-count">Đã chọn: <span id="add-selected-count">0</span> thành viên</div>
+                <button id="add-members-btn">Thêm vào nhóm</button>
+            </div>
         </div>
     </aside>
 

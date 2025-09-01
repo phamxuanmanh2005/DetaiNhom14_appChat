@@ -12,10 +12,10 @@ from typing import List
 from database import SessionLocal, get_db, Base, engine
 from models import User, Message, Friend, Group, GroupMember
 
-# ==== Database ====
+#  Database 
 Base.metadata.create_all(bind=engine)
 
-# ==== FastAPI + Socket.IO ====
+#  FastAPI + Socket.IO 
 app = FastAPI()
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 app.mount("/socket.io", socketio.ASGIApp(sio))
@@ -23,7 +23,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 templates = Jinja2Templates(directory="templates")
 
-# ==== Timezone ====
+#  Timezone 
 LOCAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 def hms_local(dt):
     if not dt:
@@ -34,17 +34,17 @@ def hms_local(dt):
 
 templates.env.filters["hms_local"] = hms_local
 
-# ==== Password ====
+#  Password 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# ==== Current user ====
+#  Current user 
 def get_current_user(request: Request):
     username = request.cookies.get("username")
     if not username:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return username
 
-# ==== Pages ====
+#  Pages 
 @app.get("/", response_class=HTMLResponse)
 def root():
     return RedirectResponse("/login")
@@ -125,7 +125,7 @@ def chat_page(
         "groups": groups 
     })
 
-# ==== Friend APIs ====
+#  Friend APIs 
 
 # Tìm kiếm user theo username
 @app.get("/users/search")
@@ -168,7 +168,7 @@ def accept_friend(request_id: int, db: Session = Depends(get_db), username: str 
     db.commit()
     return {"message": "Đã chấp nhận"}
 
-# ==== Lấy danh sách lời mời kết bạn ====
+#  Lấy danh sách lời mời kết bạn 
 @app.get("/friends/requests")
 def get_friend_requests(db: Session = Depends(get_db), username: str = Depends(get_current_user)):
     me = db.query(User).filter(User.username == username).first()
@@ -204,67 +204,241 @@ def get_friends(db: Session = Depends(get_db), username: str = Depends(get_curre
             "avatar": u.avatar
         })
     return result
-# ==== Group APIs ====
-@app.get("/groups")
-def my_groups(db: Session = Depends(get_db), username: str = Depends(get_current_user)):
+#  Group APIs 
+
+@app.post("/groups/create_with_members")
+async def create_group_with_members(
+    name: str = Form(...),
+    member_ids: str = Form(...),  # Nhận chuỗi JSON của array
+    db: Session = Depends(get_db),
+    username: str = Depends(get_current_user)
+):
+    import json
+    try:
+        # Parse member_ids từ JSON string
+        member_id_list = json.loads(member_ids)
+        if not isinstance(member_id_list, list):
+            raise HTTPException(400, "member_ids phải là một array")
+        
+        if len(member_id_list) == 0:
+            raise HTTPException(400, "Phải chọn ít nhất 1 thành viên")
+            
+        me = db.query(User).filter(User.username == username).first()
+        
+        # Tạo nhóm
+        group = Group(name=name, owner_id=me.id)
+        db.add(group)
+        db.commit()
+        db.refresh(group)
+
+        # Thêm creator (owner) vào nhóm
+        db.add(GroupMember(group_id=group.id, user_id=me.id, role="owner"))
+
+        # Thêm các thành viên được chọn
+        for uid in member_id_list:
+            uid = int(uid)  # Đảm bảo là số
+            # Kiểm tra user tồn tại
+            user_exists = db.query(User).filter(User.id == uid).first()
+            if user_exists:
+                db.add(GroupMember(group_id=group.id, user_id=uid, role="member"))
+
+        db.commit()
+
+        # Emit cho các thành viên mới để họ thấy nhóm
+        all_member_ids = [me.id] + [int(uid) for uid in member_id_list]
+        for uid in all_member_ids:
+            await sio.emit("new_group", {
+                "group_id": group.id, 
+                "name": group.name
+            }, room=f"user_{uid}")
+
+        return {
+            "group_id": group.id, 
+            "name": group.name,
+            "member_count": len(all_member_ids)
+        }
+        
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid member_ids format")
+    except Exception as e:
+        print(f"Error creating group: {e}")
+        raise HTTPException(500, "Lỗi tạo nhóm")
+
+
+@app.post("/groups/{group_id}/add_members")
+async def add_members_to_group(
+    group_id: int,
+    member_ids: str = Form(...),  # JSON string của array user IDs
+    db: Session = Depends(get_db),
+    username: str = Depends(get_current_user)
+):
+    import json
+    try:
+        # Parse member_ids từ JSON string  
+        member_id_list = json.loads(member_ids)
+        if not isinstance(member_id_list, list):
+            raise HTTPException(400, "member_ids phải là một array")
+            
+        if len(member_id_list) == 0:
+            raise HTTPException(400, "Phải chọn ít nhất 1 thành viên")
+
+        me = db.query(User).filter(User.username == username).first()
+        group = db.query(Group).filter(Group.id == group_id).first()
+        
+        if not group:
+            raise HTTPException(404, "Nhóm không tồn tại")
+
+        # Kiểm tra quyền (chỉ owner hoặc admin có thể thêm thành viên)
+        my_membership = db.query(GroupMember).filter(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == me.id
+        ).first()
+        
+        if not my_membership or my_membership.role not in ["owner", "admin"]:
+            raise HTTPException(403, "Bạn không có quyền thêm thành viên vào nhóm này")
+
+        added_members = []
+        for uid in member_id_list:
+            uid = int(uid)
+            
+            # Kiểm tra user tồn tại
+            user_exists = db.query(User).filter(User.id == uid).first()
+            if not user_exists:
+                continue
+                
+            # Kiểm tra đã là thành viên chưa
+            existing_member = db.query(GroupMember).filter(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == uid
+            ).first()
+            
+            if not existing_member:
+                # Thêm thành viên mới
+                db.add(GroupMember(group_id=group_id, user_id=uid, role="member"))
+                added_members.append(uid)
+
+        db.commit()
+
+        # Emit cho các thành viên mới về việc được thêm vào nhóm
+        for uid in added_members:
+            await sio.emit("new_group", {
+                "group_id": group.id,
+                "name": group.name
+            }, room=f"user_{uid}")
+            
+        # Emit cho các thành viên hiện tại về việc có thành viên mới
+        existing_members = db.query(GroupMember).filter(
+            GroupMember.group_id == group_id
+        ).all()
+        
+        for member in existing_members:
+            if member.user_id not in added_members:  # Không emit cho người mới thêm
+                await sio.emit("group_members_updated", {
+                    "group_id": group.id,
+                    "added_count": len(added_members)
+                }, room=f"user_{member.user_id}")
+
+        return {
+            "group_id": group_id,
+            "added_count": len(added_members),
+            "message": f"Đã thêm {len(added_members)} thành viên vào nhóm"
+        }
+        
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid member_ids format")
+    except Exception as e:
+        print(f"Error adding members: {e}")
+        raise HTTPException(500, "Lỗi thêm thành viên")
+
+
+@app.get("/groups/{group_id}/members")
+def get_group_members(
+    group_id: int,
+    db: Session = Depends(get_db),
+    username: str = Depends(get_current_user)
+):
+    """Lấy danh sách thành viên của nhóm"""
     me = db.query(User).filter(User.username == username).first()
-    groups = (
-        db.query(Group)
-        .join(GroupMember, GroupMember.group_id == Group.id)
-        .filter(GroupMember.user_id == me.id)
+    
+    # Kiểm tra user có trong nhóm không
+    my_membership = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == me.id
+    ).first()
+    
+    if not my_membership:
+        raise HTTPException(403, "Bạn không có quyền xem thành viên nhóm này")
+    
+    # Lấy danh sách thành viên
+    members = (
+        db.query(GroupMember, User)
+        .join(User, GroupMember.user_id == User.id)
+        .filter(GroupMember.group_id == group_id)
         .all()
     )
-    return [{"id": g.id, "name": g.name} for g in groups]
+    
+    return [
+        {
+            "user_id": user.id,
+            "username": user.username,
+            "role": member.role,
+            "avatar": user.avatar
+        }
+        for member, user in members
+    ]
 
 
-@app.post("/groups/create_with_member")
-async def create_group_with_member(
-    name: str = Form(...),
-    member_ids: List[int] = Form(...),  # List user_id được chọn
-    db: Session = Depends(get_db),
-    username: str = Depends(get_current_user)
-):
-    me = db.query(User).filter(User.username == username).first()
-    group = Group(name=name, owner_id=me.id)
-    db.add(group)
-    db.commit()
-    db.refresh(group)
-
-    # Thêm creator (owner)
-    db.add(GroupMember(group_id=group.id, user_id=me.id, role="owner"))
-
-    # Thêm các thành viên được chọn
-    for uid in member_ids:
-        db.add(GroupMember(group_id=group.id, user_id=uid, role="member"))
-
-    db.commit()
-
-    # 🔹 Emit cho các thành viên mới để họ thấy nhóm
-    for uid in member_ids + [me.id]:
-        await sio.emit("new_group", {"group_id": group.id, "name": group.name}, room=f"user_{uid}")
-
-    return {"group_id": group.id, "name": group.name}
-
-@app.post("/groups/{group_id}/add_member")
-def add_member_to_group(
+@app.get("/groups/{group_id}/available_users")
+def get_available_users_for_group(
     group_id: int,
-    other_user_id: int = Form(...),
     db: Session = Depends(get_db),
     username: str = Depends(get_current_user)
 ):
+    """Lấy danh sách bạn bè chưa có trong nhóm để thêm vào"""
     me = db.query(User).filter(User.username == username).first()
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(404, "Group not found")
+    
+    # Kiểm tra quyền
+    my_membership = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == me.id
+    ).first()
+    
+    if not my_membership or my_membership.role not in ["owner", "admin"]:
+        raise HTTPException(403, "Bạn không có quyền quản lý nhóm này")
+    
+    # Lấy danh sách bạn bè
+    friends = db.query(Friend).filter(
+        (Friend.status == "accepted") &
+        ((Friend.user_id == me.id) | (Friend.friend_id == me.id))
+    ).all()
 
-    if group.owner_id != me.id:
-        raise HTTPException(403, "Chỉ owner mới có quyền thêm thành viên")
-
-    db.add(GroupMember(group_id=group.id, user_id=other_user_id, role="member"))
-    db.commit()
-    return {"status": "added", "group_id": group_id, "user_id": other_user_id}
-
-# ==== Messages APIs ====
+    friend_users = []
+    for f in friends:
+        if f.friend_id == me.id:
+            u = db.query(User).get(f.user_id)
+        else:
+            u = db.query(User).get(f.friend_id)
+        friend_users.append(u)
+    
+    # Lấy danh sách thành viên hiện tại của nhóm
+    current_members = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id
+    ).all()
+    current_member_ids = [m.user_id for m in current_members]
+    
+    # Lọc ra những bạn bè chưa có trong nhóm
+    available_users = [
+        {
+            "id": u.id,
+            "username": u.username,
+            "avatar": u.avatar
+        }
+        for u in friend_users
+        if u and u.id not in current_member_ids
+    ]
+    
+    return available_users
+#  Messages APIs 
 @app.get("/messages")
 def get_messages(
     receiver_id: int = Query(None),
@@ -301,7 +475,7 @@ def get_messages(
         for m in messages
     ]
 
-# ==== Socket.IO Events ====
+#  Socket.IO Events 
 @sio.event
 async def connect(sid, environ):
     print("Client connected:", sid)
@@ -406,7 +580,7 @@ async def send_message(sid, data):
     finally:
         db.close()
 
-# ==== Logout với metadata ====
+#  Logout với metadata 
 @app.get("/logout")
 async def logout(request: Request):
     username = request.cookies.get("username")
