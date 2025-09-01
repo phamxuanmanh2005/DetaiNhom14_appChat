@@ -28,17 +28,30 @@
             <li data-room="global" class="active">🌍 Phòng chung</li>
 
             <li class="section-title">👥 Nhóm</li>
-            {% for g in groups %}
-                <li data-room="group_{{ g.id }}" data-group-id="{{ g.id }}">👥 {{ g.name }}</li>
-            {% endfor %}
+            <ul id="groups-list">
+                {% for g in groups %}
+                    <li data-room="group_{{ g.id }}" data-group-id="{{ g.id }}">👥 {{ g.name }}</li>
+                {% endfor %}
+            </ul>
+
             <li class="section-title">👤 Bạn bè</li>
             {% for u in users %}
                 <li data-room="user_{{ u.id }}" data-user-id="{{ u.id }}">👤 {{ u.username }}</li>
             {% endfor %}
-
-
-
         </ul>
+
+        <!-- Tạo nhóm mới -->
+        <div class="create-group">
+            <h4>➕ Tạo nhóm mới</h4>
+            <input type="text" id="new-group-name" placeholder="Tên nhóm..." />
+            <select id="new-group-member">
+                <option value="">Chọn thành viên</option>
+                {% for u in users %}
+                    <option value="{{ u.id }}">{{ u.username }}</option>
+                {% endfor %}
+            </select>
+            <button id="create-group-btn">Tạo nhóm</button>
+        </div>
     </aside>
 
     <!-- Chat main -->

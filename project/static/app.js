@@ -1,5 +1,4 @@
 document.addEventListener("DOMContentLoaded", function() {
-    // ==== Elements & state ====
     const chatBox = document.getElementById('chat-box');
     const inputMsg = document.getElementById('message');
     const sendBtn = document.getElementById('send');
@@ -19,7 +18,7 @@ document.addEventListener("DOMContentLoaded", function() {
     const socket = io();
     socket.emit("join_chat", { username });
 
-    // ==== Functions ====
+    // ===== Functions =====
     function escapeHtml(unsafe) {
         return unsafe.replace(/&/g, "&amp;")
                      .replace(/</g, "&lt;")
@@ -32,11 +31,9 @@ document.addEventListener("DOMContentLoaded", function() {
         const div = document.createElement("div");
         div.classList.add("msg");
         const safeMsg = escapeHtml(data.message);
-
         if (data.sender_id === 0) div.classList.add("system"), div.innerHTML = `<div class="bubble">[${data.time}] ${safeMsg}</div>`;
         else if (data.username === username) div.classList.add("self"), div.innerHTML = `<div class="bubble">[${data.time}] <b>${data.username}</b>: ${safeMsg}</div>`;
         else div.classList.add("other"), div.innerHTML = `<div class="bubble">[${data.time}] <b>${data.username}</b>: ${safeMsg}</div>`;
-
         return div;
     }
 
@@ -59,19 +56,17 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 
     function addFriendToSidebar(friend) {
-        const newFriendLi = document.createElement('li');
-        newFriendLi.dataset.room = `user_${friend.user_id}`;
-        newFriendLi.dataset.userId = friend.user_id;
-        newFriendLi.textContent = `👤 ${friend.username}`;
-        newFriendLi.addEventListener('click', () => {
+        const li = document.createElement("li");
+        li.dataset.room = `user_${friend.user_id}`;
+        li.dataset.userId = friend.user_id;
+        li.textContent = `👤 ${friend.username}`;
+        li.addEventListener("click", () => {
             currentReceiverId = friend.user_id;
             currentGroupId = null;
             currentRoom = `user_${friend.user_id}`;
             roomTitle.textContent = `Chat riêng với ${friend.username}`;
             userList.querySelectorAll("li").forEach(el => el.classList.remove("active"));
-            newFriendLi.classList.add("active");
-
-            // load messages
+            li.classList.add("active");
             fetch(`/messages?receiver_id=${currentReceiverId}`)
                 .then(res => res.json())
                 .then(data => {
@@ -80,7 +75,36 @@ document.addEventListener("DOMContentLoaded", function() {
                     chatBox.scrollTop = chatBox.scrollHeight;
                 });
         });
-        userList.appendChild(newFriendLi);
+        const friendsSection = [...userList.querySelectorAll(".section-title")].find(el => el.textContent.includes("Bạn bè"));
+        if (friendsSection) friendsSection.insertAdjacentElement("afterend", li);
+        else userList.appendChild(li);
+    }
+
+    function addGroupToSidebar(group) {
+        const li = document.createElement("li");
+        li.dataset.room = `group_${group.group_id}`;
+        li.dataset.groupId = group.group_id;
+        li.textContent = `👥 ${group.name}`;
+        li.addEventListener("click", () => {
+            currentReceiverId = null;
+            currentGroupId = group.group_id;
+            currentRoom = li.dataset.room;
+            roomTitle.textContent = group.name;
+            userList.querySelectorAll("li").forEach(el => el.classList.remove("active"));
+            li.classList.add("active");
+            fetch(`/messages?group_id=${currentGroupId}`)
+                .then(res => res.json())
+                .then(data => {
+                    chatBox.innerHTML = '';
+                    data.forEach(msg => chatBox.appendChild(renderMessage(msg)));
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                });
+            socket.emit("join_group", { group_id: currentGroupId });
+        });
+
+        const groupSection = [...userList.querySelectorAll(".section-title")].find(el => el.textContent.includes("Nhóm"));
+        if (groupSection) groupSection.insertAdjacentElement("afterend", li);
+        else userList.appendChild(li);
     }
 
     async function loadFriendRequests() {
@@ -90,34 +114,20 @@ document.addEventListener("DOMContentLoaded", function() {
             friendRequestsList.innerHTML = '';
             requests.forEach(r => {
                 const li = document.createElement('li');
-                li.innerHTML = `
-                    ${r.username} 
-                    <button class="accept-btn" data-id="${r.request_id}" data-user-id="${r.user_id}" data-username="${r.username}">Chấp nhận</button>
-                `;
+                li.innerHTML = `${r.username} <button class="accept-btn" data-id="${r.request_id}" data-user-id="${r.user_id}" data-username="${r.username}">Chấp nhận</button>`;
                 friendRequestsList.appendChild(li);
-
                 li.querySelector('.accept-btn').addEventListener('click', async (e) => {
                     const btn = e.target;
-                    const requestId = btn.dataset.id;
-                    const friend = {
-                        user_id: parseInt(btn.dataset.userId),
-                        username: btn.dataset.username
-                    };
+                    const friend = { user_id: parseInt(btn.dataset.userId), username: btn.dataset.username };
                     try {
-                        await fetch(`/friends/accept/${requestId}`, { method: "POST" });
+                        await fetch(`/friends/accept/${btn.dataset.id}`, { method: "POST" });
                         btn.textContent = "Đã chấp nhận";
                         btn.disabled = true;
-
-                        // Thêm bạn vào sidebar
                         addFriendToSidebar(friend);
-                    } catch (err) {
-                        console.error("Lỗi chấp nhận bạn bè:", err);
-                    }
+                    } catch(err){ console.error(err); }
                 });
             });
-        } catch (err) {
-            console.error("Lỗi load lời mời:", err);
-        }
+        } catch(err){ console.error(err); }
     }
 
     async function searchUsers(query) {
@@ -128,55 +138,77 @@ document.addEventListener("DOMContentLoaded", function() {
             users.forEach(u => {
                 const li = document.createElement('li');
                 li.classList.add('search-item');
-                li.innerHTML = `
-                    ${u.username} 
-                    <button class="add-friend" data-id="${u.id}">Kết bạn</button>
-                `;
+                li.innerHTML = `${u.username} <button class="add-friend" data-id="${u.id}">Kết bạn</button>`;
                 searchResults.appendChild(li);
-
                 li.querySelector(".add-friend").addEventListener("click", async (e) => {
                     e.preventDefault();
                     const btn = e.target;
-                    const friendId = btn.dataset.id;
-                    try {
-                        const resp = await fetch(`/friends/${friendId}`, { method: "POST" });
-                        const data = await resp.json();
-                        if (data.status === "pending") btn.textContent = "Đang chờ";
-                        else if (data.status === "exists") btn.textContent = "Đã là bạn";
-                        btn.disabled = true;
-                    } catch(err) {
-                        console.error("Lỗi gửi lời mời:", err);
-                    }
+                    const resp = await fetch(`/friends/${btn.dataset.id}`, { method: "POST" });
+                    const data = await resp.json();
+                    if (data.status === "pending") btn.textContent = "Đang chờ";
+                    else if (data.status === "exists") btn.textContent = "Đã là bạn";
+                    btn.disabled = true;
                 });
             });
-        } catch(err) {
-            console.error("Lỗi tìm kiếm user:", err);
-        }
+        } catch(err){ console.error(err); }
     }
 
-    // ==== Event listeners ====
+    // ==== Tạo nhóm mới ====
+   const createGroupBtn = document.getElementById('create-group-btn');
+const newGroupNameInput = document.getElementById('new-group-name');
+const newGroupMemberSelect = document.getElementById('new-group-member');
+
+if (createGroupBtn && newGroupNameInput && newGroupMemberSelect) {
+    createGroupBtn.addEventListener('click', async () => {
+        const groupName = newGroupNameInput.value.trim();
+        const memberId = parseInt(newGroupMemberSelect.value);
+        if (!groupName) { alert("Vui lòng nhập tên nhóm"); return; }
+        if (!memberId) { alert("Vui lòng chọn thành viên"); return; }
+
+        try {
+            const formData = new FormData();
+            formData.append("name", groupName);
+            formData.append("member_ids", memberId);;
+
+            // 🔹 Tạo nhóm, không add trực tiếp
+            const res = await fetch("/groups/create_with_member", { method: "POST", body: formData });
+            const data = await res.json();
+
+            if (data.group_id) {
+                // socket sẽ emit "new_group" => JS lắng nghe và add vào sidebar
+                newGroupNameInput.value = "";
+                newGroupMemberSelect.value = "";
+                alert(`Nhóm "${data.name}" đã được tạo`);
+            } else {
+                alert("Tạo nhóm thất bại");
+            }
+        } catch(err) {
+            console.error(err);
+            alert("Lỗi tạo nhóm");
+        }
+    });
+}
+
+    // ==== Event listeners chat ====
     sendBtn.onclick = sendMessage;
-    inputMsg.addEventListener("keypress", e => { if (e.key === "Enter") sendMessage(); });
+    inputMsg.addEventListener("keypress", e => { if(e.key === "Enter") sendMessage(); });
 
     userList.querySelectorAll("li[data-room]").forEach(li => {
         li.addEventListener("click", () => {
             userList.querySelectorAll("li").forEach(el => el.classList.remove("active"));
             li.classList.add("active");
-
             currentReceiverId = li.dataset.userId ? parseInt(li.dataset.userId) : null;
             currentGroupId = li.dataset.groupId ? parseInt(li.dataset.groupId) : null;
             currentRoom = li.dataset.room;
-
-            if (currentReceiverId) roomTitle.textContent = `Chat riêng với ${li.textContent.replace('👤 ', '')}`;
-            else if (currentGroupId) {
+            if(currentReceiverId) roomTitle.textContent = `Chat riêng với ${li.textContent.replace('👤 ', '')}`;
+            else if(currentGroupId){ 
                 roomTitle.textContent = li.textContent.replace('👥 ', '');
-                socket.emit("join_group", { group_id: currentGroupId });
+                socket.emit("join_group", { group_id: currentGroupId }); 
             } else roomTitle.textContent = "Phòng chung";
 
-            // Load messages
             let url = "/messages";
-            if (currentReceiverId) url += "?receiver_id=" + currentReceiverId;
-            else if (currentGroupId) url += "?group_id=" + currentGroupId;
+            if(currentReceiverId) url += "?receiver_id=" + currentReceiverId;
+            else if(currentGroupId) url += "?group_id=" + currentGroupId;
 
             fetch(url)
                 .then(res => res.json())
@@ -190,18 +222,19 @@ document.addEventListener("DOMContentLoaded", function() {
 
     searchInput.addEventListener('input', async () => {
         const query = searchInput.value.trim();
-        if (!query) {
-            searchResults.innerHTML = '';
-            return;
-        }
-        searchUsers(query);
+        if(!query) searchResults.innerHTML = '';
+        else searchUsers(query);
     });
 
-    socket.on("chat_message", function(data) {
-        if (checkMessageBelongsToCurrentRoom(data)) {
+    socket.on("chat_message", function(data){
+        if(checkMessageBelongsToCurrentRoom(data)){
             chatBox.appendChild(renderMessage(data));
             chatBox.scrollTop = chatBox.scrollHeight;
         }
+    });
+
+    socket.on("new_group", function(group) {
+        addGroupToSidebar(group);
     });
 
     // ==== Initial load ====

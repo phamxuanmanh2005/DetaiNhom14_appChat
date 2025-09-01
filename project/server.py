@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, Depends, HTTPException, Query
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, Query, Body
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -7,6 +7,7 @@ from passlib.context import CryptContext
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import socketio
+from typing import List
 
 from database import SessionLocal, get_db, Base, engine
 from models import User, Message, Friend, Group, GroupMember
@@ -74,19 +75,6 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     resp.set_cookie("username", username, httponly=True, max_age=3600)
     return resp
 
-@app.get("/logout")
-async def logout(request: Request):
-    username = request.cookies.get("username")
-    resp = RedirectResponse("/login")
-    resp.delete_cookie("username")
-    if username:
-        await sio.emit("chat_message", {
-            "time": datetime.now(timezone.utc).astimezone(LOCAL_TZ).strftime("%H:%M:%S"),
-            "username": "System",
-            "message": f"⚠️ {username} đã rời phòng chat",
-            "sender_id": 0
-        })
-    return resp
 
 @app.get("/chat", response_class=HTMLResponse)
 def chat_page(
@@ -230,10 +218,9 @@ def my_groups(db: Session = Depends(get_db), username: str = Depends(get_current
 
 
 @app.post("/groups/create_with_member")
-def create_group_with_member(
-    request: Request,
+async def create_group_with_member(
     name: str = Form(...),
-    other_user_id: int = Form(...),
+    member_ids: List[int] = Form(...),  # List user_id được chọn
     db: Session = Depends(get_db),
     username: str = Depends(get_current_user)
 ):
@@ -243,12 +230,20 @@ def create_group_with_member(
     db.commit()
     db.refresh(group)
 
+    # Thêm creator (owner)
     db.add(GroupMember(group_id=group.id, user_id=me.id, role="owner"))
-    db.add(GroupMember(group_id=group.id, user_id=other_user_id, role="member"))
+
+    # Thêm các thành viên được chọn
+    for uid in member_ids:
+        db.add(GroupMember(group_id=group.id, user_id=uid, role="member"))
+
     db.commit()
 
-    return {"group_id": group.id, "name": group.name}
+    # 🔹 Emit cho các thành viên mới để họ thấy nhóm
+    for uid in member_ids + [me.id]:
+        await sio.emit("new_group", {"group_id": group.id, "name": group.name}, room=f"user_{uid}")
 
+    return {"group_id": group.id, "name": group.name}
 
 @app.post("/groups/{group_id}/add_member")
 def add_member_to_group(
@@ -319,9 +314,7 @@ async def disconnect(sid):
     if username:
         # Chỉ gửi thông báo disconnect vào phòng chung với metadata
         await sio.emit("chat_message", {
-            "time": datetime.now(timezone.utc).astimezone(LOCAL_TZ).strftime("%H:%M:%S"),
             "username": "System",
-            "message": f"⚠️ {username} đã mất kết nối",
             "sender_id": 0,
             "receiver_id": None,
             "group_id": None
@@ -342,10 +335,12 @@ async def join_chat(sid, data):
 
     # Chỉ gửi thông báo join vào phòng chung với metadata
     await sio.emit("chat_message", {
-        "username": "System",
-        "sender_id": 0,
-        "receiver_id": None,
-        "group_id": None
+    "time": datetime.now(timezone.utc).astimezone(LOCAL_TZ).strftime("%H:%M:%S"),
+    "username": "System",
+    "message": f"⚡ {username} đã tham gia phòng chat",
+    "sender_id": 0,
+    "receiver_id": None,
+    "group_id": None
     }, room="public")
 
 @sio.event
@@ -417,8 +412,9 @@ async def logout(request: Request):
     username = request.cookies.get("username")
     resp = RedirectResponse("/login")
     resp.delete_cookie("username")
+    
     if username:
-        # Gửi thông báo logout với metadata đầy đủ
+        # Gửi thông báo logout vào phòng chung với metadata đầy đủ
         await sio.emit("chat_message", {
             "time": datetime.now(timezone.utc).astimezone(LOCAL_TZ).strftime("%H:%M:%S"),
             "username": "System",
@@ -427,4 +423,5 @@ async def logout(request: Request):
             "receiver_id": None,
             "group_id": None
         }, room="public")
+    
     return resp
